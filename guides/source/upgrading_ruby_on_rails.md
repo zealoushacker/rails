@@ -1,3 +1,5 @@
+**DO NOT READ THIS FILE ON GITHUB, GUIDES ARE PUBLISHED ON http://guides.rubyonrails.org.**
+
 A Guide for Upgrading Ruby on Rails
 ===================================
 
@@ -18,9 +20,10 @@ The best way to be sure that your application still works after upgrading is to 
 
 Rails generally stays close to the latest released Ruby version when it's released:
 
-* Rails 3 and above require Ruby 1.8.7 or higher. Support for all of the previous Ruby versions has been dropped officially. You should upgrade as early as possible.
-* Rails 3.2.x is the last branch to support Ruby 1.8.7.
+* Rails 5 requires Ruby 2.2 or newer.
 * Rails 4 prefers Ruby 2.0 and requires 1.9.3 or newer.
+* Rails 3.2.x is the last branch to support Ruby 1.8.7.
+* Rails 3 and above require Ruby 1.8.7 or higher. Support for all of the previous Ruby versions has been dropped officially. You should upgrade as early as possible.
 
 TIP: Ruby 1.8.7 p248 and p249 have marshaling bugs that crash Rails. Ruby Enterprise Edition has these fixed since the release of 1.8.7-2010.02. On the 1.9 front, Ruby 1.9.1 is not usable because it outright segfaults, so if you want to use 1.9.x, jump straight to 1.9.3 for smooth sailing.
 
@@ -46,6 +49,31 @@ Overwrite /myapp/config/application.rb? (enter "h" for help) [Ynaqdh]
 ```
 
 Don't forget to review the difference, to see if there were any unexpected changes.
+
+Upgrading from Rails 4.2 to Rails 5.0
+-------------------------------------
+
+### Halting callback chains by returning `false`
+
+In Rails 4.2, when a 'before' callback returns `false` in ActiveRecord,
+ActiveModel and ActiveModel::Validations, then the entire callback chain
+is halted. In other words, successive 'before' callbacks are not executed,
+and neither is the action wrapped in callbacks.
+
+In Rails 5.0, returning `false` in a callback will not have this side effect
+of halting the callback chain. Instead, callback chains must be explicitly
+halted by calling `throw(:abort)`.
+
+When you upgrade from Rails 4.2 to Rails 5.0, returning `false` in a callback
+will still halt the callback chain, but you will receive a deprecation warning
+about this upcoming change.
+
+When you are ready, you can opt into the new behavior and remove the deprecation
+warning by adding the following configuration to your `config/application.rb`:
+
+    config.active_support.halt_callback_chains_on_return_false = false
+
+See [#17227](https://github.com/rails/rails/pull/17227) for more details.
 
 Upgrading from Rails 4.1 to Rails 4.2
 -------------------------------------
@@ -207,11 +235,62 @@ gem 'rails-deprecated_sanitizer'
 ```
 
 ### Rails DOM Testing
+
 The [`TagAssertions` module](http://api.rubyonrails.org/classes/ActionDispatch/Assertions/TagAssertions.html) (containing methods such as `assert_tag`), [has been deprecated](https://github.com/rails/rails/blob/6061472b8c310158a2a2e8e9a6b81a1aef6b60fe/actionpack/lib/action_dispatch/testing/assertions/dom.rb) in favor of the `assert_select` methods from the `SelectorAssertions` module, which has been extracted into the [rails-dom-testing gem](https://github.com/rails/rails-dom-testing).
 
 
 ### Masked Authenticity Tokens
+
 In order to mitigate SSL attacks, `form_authenticity_token` is now masked so that it varies with each request.  Thus, tokens are validated by unmasking and then decrypting.  As a result, any strategies for verifying requests from non-rails forms that relied on a static session CSRF token have to take this into account.
+
+### Action Mailer
+
+Previously, calling a mailer method on a mailer class will result in the
+corresponding instance method being executed directly. With the introduction of
+Active Job and `#deliver_later`, this is no longer true. In Rails 4.2, the
+invocation of the instance methods are deferred until either `deliver_now` or
+`deliver_later` is called. For example:
+
+```ruby
+class Notifier < ActionMailer::Base
+  def notify(user, ...)
+    puts "Called"
+    mail(to: user.email, ...)
+  end
+end
+
+mail = Notifier.notify(user, ...) # Notifier#notify is not yet called at this point
+mail = mail.deliver_now           # Prints "Called"
+```
+
+This should not result in any noticeable differences for most applications.
+However, if you need some non-mailer methods to be executed synchronously, and
+you were previously relying on the synchronous proxying behavior, you should
+define them as class methods on the mailer class directly:
+
+```ruby
+class Notifier < ActionMailer::Base
+  def self.broadcast_notifications(users, ...)
+    users.each { |user| Notifier.notify(user, ...) }
+  end
+end
+```
+
+### Foreign Key Support
+
+The migration DSL has been expanded to support foreign key definitions. If
+you've been using the Foreigner gem, you might want to consider removing it.
+Note that the foreign key support of Rails is a subset of Foreigner. This means
+that not every Foreigner definition can be fully replaced by it's Rails
+migration DSL counterpart.
+
+The migration procedure is as follows:
+
+1. remove `gem "foreigner"` from the Gemfile.
+2. run `bundle install`.
+3. run `bin/rake db:schema:dump`.
+4. make sure that `db/schema.rb` contains every foreign key definition with
+the necessary options.
 
 Upgrading from Rails 4.0 to Rails 4.1
 -------------------------------------
@@ -471,7 +550,7 @@ module FixtureFileHelpers
     Digest::SHA2.hexdigest(File.read(Rails.root.join('test/fixtures', path)))
   end
 end
-ActiveRecord::FixtureSet.context_class.send :include, FixtureFileHelpers
+ActiveRecord::FixtureSet.context_class.include FixtureFileHelpers
 ```
 
 ### I18n enforcing available locales
@@ -731,7 +810,7 @@ file (in `config/application.rb`):
 ```ruby
 # Require the gems listed in Gemfile, including any gems
 # you've limited to :test, :development, or :production.
-Bundler.require(:default, Rails.env)
+Bundler.require(*Rails.groups)
 ```
 
 ### vendor/plugins
@@ -1075,7 +1154,7 @@ You can help test performance with these additions to your test environment:
 
 ```ruby
 # Configure static asset server for tests with Cache-Control for performance
-config.serve_static_assets = true
+config.serve_static_files = true
 config.static_cache_control = 'public, max-age=3600'
 ```
 

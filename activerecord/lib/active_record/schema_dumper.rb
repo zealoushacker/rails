@@ -117,16 +117,17 @@ HEADER
           if pkcol
             if pk != 'id'
               tbl.print %Q(, primary_key: "#{pk}")
-            elsif pkcol.sql_type == 'bigint'
-              tbl.print ", id: :bigserial"
-            elsif pkcol.sql_type == 'uuid'
-              tbl.print ", id: :uuid"
-              tbl.print %Q(, default: "#{pkcol.default_function}") if pkcol.default_function
+            end
+            pkcolspec = @connection.column_spec_for_primary_key(pkcol)
+            if pkcolspec
+              pkcolspec.each do |key, value|
+                tbl.print ", #{key}: #{value}"
+              end
             end
           else
             tbl.print ", id: false"
           end
-          tbl.print ", force: true"
+          tbl.print ", force: :cascade"
           tbl.puts " do |t|"
 
           # then dump all non-primary key columns

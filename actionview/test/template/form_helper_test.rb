@@ -40,6 +40,9 @@ class FormHelperTest < ActionView::TestCase
           },
           tag: {
             value: "Tag"
+          },
+          post_delegate: {
+            title: 'Delegate model_name title'
           }
         }
       }
@@ -81,6 +84,9 @@ class FormHelperTest < ActionView::TestCase
               body: "Write body here"
             }
           },
+          post_delegate: {
+            title: 'Delegate model_name title'
+          },
           tag: {
             value: "Tag"
           }
@@ -99,7 +105,9 @@ class FormHelperTest < ActionView::TestCase
       }.new
     end
     def @post.to_key; [123]; end
-    def @post.id_before_type_cast; 123; end
+    def @post.id; 0; end
+    def @post.id_before_type_cast; "omg"; end
+    def @post.id_came_from_user?; true; end
     def @post.to_param; '123'; end
 
     @post.persisted   = true
@@ -114,6 +122,10 @@ class FormHelperTest < ActionView::TestCase
 
     @post.tags = []
     @post.tags << Tag.new
+
+    @post_delegator = PostDelegator.new
+
+    @post_delegator.title = 'Hello World'
 
     @car = Car.new("#000FFF")
   end
@@ -247,6 +259,18 @@ class FormHelperTest < ActionView::TestCase
     end
   end
 
+  def test_label_with_non_active_record_object
+    form_for(OpenStruct.new(name:'ok'), as: 'person', url: 'an_url', html: { id: 'create-person' }) do |f|
+      f.label(:name)
+    end
+
+    expected = whole_form("an_url", "create-person", "new_person", method: "post") do
+      '<label for="person_name">Name</label>'
+    end
+
+    assert_dom_equal expected, output_buffer
+  end
+
   def test_label_with_for_attribute_as_symbol
     assert_dom_equal('<label for="my_for">Title</label>', label(:post, :title, nil, for: "my_for"))
   end
@@ -335,6 +359,22 @@ class FormHelperTest < ActionView::TestCase
     )
   end
 
+  def test_label_with_to_model
+    assert_dom_equal(
+      %{<label for="post_delegator_title">Delegate Title</label>},
+      label(:post_delegator, :title)
+    )
+  end
+
+  def test_label_with_to_model_and_overriden_model_name
+    with_locale :label do
+      assert_dom_equal(
+        %{<label for="post_delegator_title">Delegate model_name title</label>},
+        label(:post_delegator, :title)
+      )
+    end
+  end
+
   def test_text_field_placeholder_without_locales
     with_locale :placeholder do
       assert_dom_equal('<input id="post_body" name="post[body]" placeholder="Body" type="text" value="Back to the hill and over it again!" />', text_field(:post, :body, placeholder: true))
@@ -347,10 +387,26 @@ class FormHelperTest < ActionView::TestCase
     end
   end
 
+  def test_text_field_placeholder_with_locales_and_to_model
+    with_locale :placeholder do
+      assert_dom_equal(
+        '<input id="post_delegator_title" name="post_delegator[title]" placeholder="Delegate model_name title" type="text" value="Hello World" />',
+        text_field(:post_delegator, :title, placeholder: true)
+      )
+    end
+  end
+
   def test_text_field_placeholder_with_human_attribute_name
     with_locale :placeholder do
       assert_dom_equal('<input id="post_cost" name="post[cost]" placeholder="Total cost" type="text" />', text_field(:post, :cost, placeholder: true))
     end
+  end
+
+  def test_text_field_placeholder_with_human_attribute_name_and_to_model
+    assert_dom_equal(
+      '<input id="post_delegator_title" name="post_delegator[title]" placeholder="Delegate Title" type="text" value="Hello World" />',
+      text_field(:post_delegator, :title, placeholder: true)
+    )
   end
 
   def test_text_field_placeholder_with_string_value
@@ -472,18 +528,33 @@ class FormHelperTest < ActionView::TestCase
     assert_dom_equal expected, text_field(object_name, "title")
   end
 
-  def test_file_field_has_no_size
+  def test_file_field_does_generate_a_hidden_field
+    expected = '<input name="user[avatar]" type="hidden" value="" /><input id="user_avatar" name="user[avatar]" type="file" />'
+    assert_dom_equal expected, file_field("user", "avatar")
+  end
+
+  def test_file_field_does_not_generate_a_hidden_field_if_included_hidden_option_is_false
     expected = '<input id="user_avatar" name="user[avatar]" type="file" />'
+    assert_dom_equal expected, file_field("user", "avatar", include_hidden: false)
+  end
+
+  def test_file_field_does_not_generate_a_hidden_field_if_included_hidden_option_is_false_with_key_as_string
+    expected = '<input id="user_avatar" name="user[avatar]" type="file" />'
+    assert_dom_equal expected, file_field("user", "avatar", "include_hidden" => false)
+  end
+
+  def test_file_field_has_no_size
+    expected = '<input name="user[avatar]" type="hidden" value="" /><input id="user_avatar" name="user[avatar]" type="file" />'
     assert_dom_equal expected, file_field("user", "avatar")
   end
 
   def test_file_field_with_multiple_behavior
-    expected = '<input id="import_file" multiple="multiple" name="import[file][]" type="file" />'
+    expected = '<input name="import[file][]" type="hidden" value="" /><input id="import_file" multiple="multiple" name="import[file][]" type="file" />'
     assert_dom_equal expected, file_field("import", "file", :multiple => true)
   end
 
   def test_file_field_with_multiple_behavior_and_explicit_name
-    expected = '<input id="import_file" multiple="multiple" name="custom" type="file" />'
+    expected = '<input name="custom" type="hidden" value="" /><input id="import_file" multiple="multiple" name="custom" type="file" />'
     assert_dom_equal expected, file_field("import", "file", :multiple => true, :name => "custom")
   end
 
@@ -885,9 +956,29 @@ class FormHelperTest < ActionView::TestCase
     )
   end
 
-  def test_text_area_with_value_before_type_cast
+  def test_inputs_use_before_type_cast_to_retain_information_from_validations_like_numericality
     assert_dom_equal(
-      %{<textarea id="post_id" name="post[id]">\n123</textarea>},
+      %{<textarea id="post_id" name="post[id]">\nomg</textarea>},
+      text_area("post", "id")
+    )
+  end
+
+  def test_inputs_dont_use_before_type_cast_when_value_did_not_come_from_user
+    class << @post
+      undef id_came_from_user?
+      def id_came_from_user?; false; end
+    end
+
+    assert_dom_equal(
+      %{<textarea id="post_id" name="post[id]">\n0</textarea>},
+      text_area("post", "id")
+    )
+  end
+
+  def test_inputs_use_before_typecast_when_object_doesnt_respond_to_came_from_user
+    class << @post; undef id_came_from_user?; end
+    assert_dom_equal(
+      %{<textarea id="post_id" name="post[id]">\nomg</textarea>},
       text_area("post", "id")
     )
   end
@@ -1719,7 +1810,7 @@ class FormHelperTest < ActionView::TestCase
     end
 
     expected = whole_form("/posts/123", "create-post", "edit_post", method: "patch", multipart: true) do
-      "<input name='post[file]' type='file' id='post_file' />"
+      "<input name='post[file]' type='hidden' value='' /><input name='post[file]' type='file' id='post_file' />"
     end
 
     assert_dom_equal expected, output_buffer
@@ -1735,7 +1826,7 @@ class FormHelperTest < ActionView::TestCase
     end
 
     expected = whole_form("/posts/123", "edit_post_123", "edit_post", method: "patch", multipart: true) do
-      "<input name='post[comment][file]' type='file' id='post_comment_file' />"
+      "<input name='post[comment][file]' type='hidden' value='' /><input name='post[comment][file]' type='file' id='post_comment_file' />"
     end
 
     assert_dom_equal expected, output_buffer

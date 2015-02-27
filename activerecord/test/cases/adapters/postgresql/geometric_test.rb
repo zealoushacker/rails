@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 require "cases/helper"
 require 'support/connection_helper'
 require 'support/schema_dumping_helper'
@@ -19,16 +18,17 @@ class PostgresqlPointTest < ActiveRecord::TestCase
   end
 
   teardown do
-    @connection.execute 'DROP TABLE IF EXISTS postgresql_points'
+    @connection.drop_table 'postgresql_points', if_exists: true
   end
 
   def test_column
     column = PostgresqlPoint.columns_hash["x"]
     assert_equal :point, column.type
     assert_equal "point", column.sql_type
-    assert_not column.number?
-    assert_not column.binary?
-    assert_not column.array
+    assert_not column.array?
+
+    type = PostgresqlPoint.type_for_attribute("x")
+    assert_not type.binary?
   end
 
   def test_default
@@ -84,7 +84,7 @@ class PostgresqlGeometricTest < ActiveRecord::TestCase
   end
 
   teardown do
-    @connection.execute 'DROP TABLE IF EXISTS postgresql_geometrics'
+    @connection.drop_table 'postgresql_geometrics', if_exists: true
   end
 
   def test_geometric_types

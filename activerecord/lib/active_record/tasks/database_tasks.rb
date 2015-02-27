@@ -188,13 +188,28 @@ module ActiveRecord
         class_for_adapter(configuration['adapter']).new(*arguments).structure_load(filename)
       end
 
-      def load_schema(format = ActiveRecord::Base.schema_format, file = nil)
-        ActiveSupport::Deprecation.warn(<<-MSG.squish)
-          This method will act on a specific connection in the future.
-          To act on the current connection, use `load_schema_current` instead.
-        MSG
+      def load_schema(configuration, format = ActiveRecord::Base.schema_format, file = nil) # :nodoc:
+        file ||= schema_file(format)
 
-        load_schema_current(format, file)
+        case format
+        when :ruby
+          check_schema_file(file)
+          ActiveRecord::Base.establish_connection(configuration)
+          load(file)
+        when :sql
+          check_schema_file(file)
+          structure_load(configuration, file)
+        else
+          raise ArgumentError, "unknown format #{format.inspect}"
+        end
+      end
+
+      def load_schema_for(*args)
+        ActiveSupport::Deprecation.warn(<<-MSG.squish)
+          This method was renamed to `#load_schema` and will be removed in the future.
+          Use `#load_schema` instead.
+        MSG
+        load_schema(*args)
       end
 
       def schema_file(format = ActiveSupport::Base.schema_format)
@@ -206,26 +221,6 @@ module ActiveRecord
         end
       end
 
-      # This method is the successor of +load_schema+. We should rename it
-      # after +load_schema+ went through a deprecation cycle. (Rails > 4.2)
-      def load_schema_for(configuration, format = ActiveRecord::Base.schema_format, file = nil) # :nodoc:
-        file ||= schema_file(format)
-
-        case format
-        when :ruby
-          check_schema_file(file)
-          purge(configuration)
-          ActiveRecord::Base.establish_connection(configuration)
-          load(file)
-        when :sql
-          check_schema_file(file)
-          purge(configuration)
-          structure_load(configuration, file)
-        else
-          raise ArgumentError, "unknown format #{format.inspect}"
-        end
-      end
-
       def load_schema_current_if_exists(format = ActiveRecord::Base.schema_format, file = nil, environment = env)
         if File.exist?(file || schema_file(format))
           load_schema_current(format, file, environment)
@@ -234,7 +229,7 @@ module ActiveRecord
 
       def load_schema_current(format = ActiveRecord::Base.schema_format, file = nil, environment = env)
         each_current_configuration(environment) { |configuration|
-          load_schema_for configuration, format, file
+          load_schema configuration, format, file
         }
         ActiveRecord::Base.establish_connection(environment.to_sym)
       end

@@ -2,7 +2,6 @@ require 'thread'
 require 'thread_safe'
 require 'monitor'
 require 'set'
-require 'active_support/core_ext/string/filters'
 
 module ActiveRecord
   # Raised when a connection could not be obtained within the connection
@@ -236,7 +235,7 @@ module ActiveRecord
         @spec = spec
 
         @checkout_timeout = (spec.config[:checkout_timeout] && spec.config[:checkout_timeout].to_f) || 5
-        @reaper  = Reaper.new self, spec.config[:reaping_frequency]
+        @reaper = Reaper.new(self, (spec.config[:reaping_frequency] && spec.config[:reaping_frequency].to_f))
         @reaper.run
 
         # default max pool size to 5
@@ -363,7 +362,7 @@ module ActiveRecord
             conn.expire
           end
 
-          release owner
+          release conn, owner
 
           @available.add conn
         end
@@ -376,7 +375,7 @@ module ActiveRecord
           @connections.delete conn
           @available.delete conn
 
-          release conn.owner
+          release conn, conn.owner
 
           @available.add checkout_new_connection if @available.any_waiting?
         end
@@ -424,10 +423,12 @@ module ActiveRecord
         end
       end
 
-      def release(owner)
+      def release(conn, owner)
         thread_id = owner.object_id
 
-        @reserved_connections.delete thread_id
+        if @reserved_connections[thread_id] == conn
+          @reserved_connections.delete thread_id
+        end
       end
 
       def new_connection
@@ -452,6 +453,10 @@ module ActiveRecord
           c.verify!
         end
         c
+      rescue
+        remove c
+        c.disconnect!
+        raise
       end
     end
 
@@ -515,15 +520,7 @@ module ActiveRecord
       def connection_pool_list
         owner_to_pool.values.compact
       end
-
-      def connection_pools
-        ActiveSupport::Deprecation.warn(<<-MSG.squish)
-          In the next release, this will return the same as `#connection_pool_list`.
-          (An array of pools, rather than a hash mapping specs to pools.)
-        MSG
-
-        Hash[connection_pool_list.map { |pool| [pool.spec, pool] }]
-      end
+      alias :connection_pools :connection_pool_list
 
       def establish_connection(owner, spec)
         @class_to_pool.clear

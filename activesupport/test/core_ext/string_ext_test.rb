@@ -1,4 +1,3 @@
-# encoding: utf-8
 require 'date'
 require 'abstract_unit'
 require 'inflector_test_cases'
@@ -248,6 +247,15 @@ class StringInflectionsTest < ActiveSupport::TestCase
   def test_truncate_words_with_separator_and_omission
     assert_equal "Hello<br>Big<br>World![...]", "Hello<br>Big<br>World!<br>".truncate_words(3, :omission => "[...]", :separator => '<br>')
     assert_equal "Hello<br>Big<br>World!", "Hello<br>Big<br>World!".truncate_words(3, :omission => "[...]", :separator => '<br>')
+  end
+
+  def test_truncate_words_with_complex_string
+    Timeout.timeout(10) do
+      complex_string = "aa aa aaa aa aaa aaa aaa aa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaaa aaaaa aaaaa aaaaaa aa aa aa aaa aa  aaa aa aa aa aa a aaa aaa \n a aaa <<s"
+      assert_equal complex_string.truncate_words(80), complex_string
+    end
+  rescue Timeout::Error
+    assert false
   end
 
   def test_truncate_multibyte
@@ -664,16 +672,6 @@ class OutputSafetyTest < ActiveSupport::TestCase
     other = "other".html_safe
     other.prepend "<foo>"
     assert other.html_safe?
-    assert_equal other, "&lt;foo&gt;other"
-  end
-
-  test "Deprecated #prepend! method is still present" do
-    other = "other".html_safe
-
-    assert_deprecated do
-      other.prepend! "<foo>"
-    end
-
     assert_equal other, "&lt;foo&gt;other"
   end
 

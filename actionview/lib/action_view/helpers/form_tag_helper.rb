@@ -84,14 +84,13 @@ module ActionView
       # * <tt>:disabled</tt> - If set to true, the user will not be able to use this input.
       # * <tt>:include_blank</tt> - If set to true, an empty option will be created. If set to a string, the string will be used as the option's content and the value will be empty.
       # * <tt>:prompt</tt> - Create a prompt option with blank value and the text asking user to select something.
-      # * <tt>:selected</tt> - Provide a default selected value. It should be of the exact type as the provided options.
       # * Any other key creates standard HTML attributes for the tag.
       #
       # ==== Examples
       #   select_tag "people", options_from_collection_for_select(@people, "id", "name")
       #   # <select id="people" name="people"><option value="1">David</option></select>
       #
-      #   select_tag "people", options_from_collection_for_select(@people, "id", "name"), selected: ["1", "David"]
+      #   select_tag "people", options_from_collection_for_select(@people, "id", "name", "1")
       #   # <select id="people" name="people"><option value="1" selected="selected">David</option></select>
       #
       #   select_tag "people", "<option>David</option>".html_safe
@@ -777,10 +776,10 @@ module ActionView
       #   # => <input id="quantity" name="quantity" min="1" max="9" type="number" />
       #
       #   number_field_tag 'quantity', nil, min: 1, max: 10
-      #   # => <input id="quantity" name="quantity" min="1" max="9" type="number" />
+      #   # => <input id="quantity" name="quantity" min="1" max="10" type="number" />
       #
       #   number_field_tag 'quantity', nil, min: 1, max: 10, step: 2
-      #   # => <input id="quantity" name="quantity" min="1" max="9" step="2" type="number" />
+      #   # => <input id="quantity" name="quantity" min="1" max="10" step="2" type="number" />
       #
       #   number_field_tag 'quantity', '1', class: 'special_input', disabled: true
       #   # => <input disabled="disabled" class="special_input" id="quantity" name="quantity" type="number" value="1" />

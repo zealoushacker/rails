@@ -1,4 +1,3 @@
-# encoding: utf-8
 require 'cases/helper'
 require 'support/schema_dumping_helper'
 
@@ -23,7 +22,7 @@ class PostgresqlXMLTest < ActiveRecord::TestCase
   end
 
   teardown do
-    @connection.execute 'drop table if exists xml_data_type'
+    @connection.drop_table 'xml_data_type', if_exists: true
   end
 
   def test_column
@@ -50,6 +49,6 @@ class PostgresqlXMLTest < ActiveRecord::TestCase
 
   def test_schema_dump_with_shorthand
     output = dump_table_schema("xml_data_type")
-    assert_match %r{t.xml "payload"}, output
+    assert_match %r{t\.xml "payload"}, output
   end
 end

@@ -14,9 +14,9 @@ require MIGRATIONS_ROOT + "/decimal/1_give_me_big_numbers"
 
 class BigNumber < ActiveRecord::Base
   unless current_adapter?(:PostgreSQLAdapter, :SQLite3Adapter)
-    attribute :value_of_e, Type::Integer.new
+    attribute :value_of_e, :integer
   end
-  attribute :my_house_population, Type::Integer.new
+  attribute :my_house_population, :integer
 end
 
 class Reminder < ActiveRecord::Base; end
@@ -90,7 +90,7 @@ class MigrationTest < ActiveRecord::TestCase
   end
 
   def test_migration_detection_without_schema_migration_table
-    ActiveRecord::Base.connection.drop_table('schema_migrations') if ActiveRecord::Base.connection.table_exists?('schema_migrations')
+    ActiveRecord::Base.connection.drop_table 'schema_migrations', if_exists: true
 
     migrations_path = MIGRATIONS_ROOT + "/valid"
     old_path = ActiveRecord::Migrator.migrations_paths
@@ -119,10 +119,6 @@ class MigrationTest < ActiveRecord::TestCase
   end
 
   def test_create_table_with_force_true_does_not_drop_nonexisting_table
-    if Person.connection.table_exists?(:testings2)
-      Person.connection.drop_table :testings2
-    end
-
     # using a copy as we need the drop_table method to
     # continue to work for the ensure block of the test
     temp_conn = Person.connection.dup
@@ -133,7 +129,7 @@ class MigrationTest < ActiveRecord::TestCase
       t.column :foo, :string
     end
   ensure
-    Person.connection.drop_table :testings2 rescue nil
+    Person.connection.drop_table :testings2, if_exists: true
   end
 
   def connection
@@ -162,6 +158,7 @@ class MigrationTest < ActiveRecord::TestCase
 
     assert !BigNumber.table_exists?
     GiveMeBigNumbers.up
+    BigNumber.reset_column_information
 
     assert BigNumber.create(
       :bank_balance => 1586.43,
@@ -397,6 +394,7 @@ class MigrationTest < ActiveRecord::TestCase
     Thing.reset_table_name
     Thing.reset_sequence_name
     WeNeedThings.up
+    Thing.reset_column_information
 
     assert Thing.create("content" => "hello world")
     assert_equal "hello world", Thing.first.content
@@ -416,6 +414,7 @@ class MigrationTest < ActiveRecord::TestCase
     ActiveRecord::Base.table_name_suffix = '_suffix'
     Reminder.reset_table_name
     Reminder.reset_sequence_name
+    Reminder.reset_column_information
     WeNeedReminders.up
     assert Reminder.create("content" => "hello world", "remind_at" => Time.now)
     assert_equal "hello world", Reminder.first.content
@@ -427,8 +426,6 @@ class MigrationTest < ActiveRecord::TestCase
   end
 
   def test_create_table_with_binary_column
-    Person.connection.drop_table :binary_testings rescue nil
-
     assert_nothing_raised {
       Person.connection.create_table :binary_testings do |t|
         t.column "data", :binary, :null => false
@@ -440,7 +437,7 @@ class MigrationTest < ActiveRecord::TestCase
 
     assert_nil data_column.default
 
-    Person.connection.drop_table :binary_testings rescue nil
+    Person.connection.drop_table :binary_testings, if_exists: true
   end
 
   unless mysql_enforcing_gtid_consistency?
@@ -511,11 +508,13 @@ class MigrationTest < ActiveRecord::TestCase
   if current_adapter?(:MysqlAdapter, :Mysql2Adapter, :PostgreSQLAdapter)
     def test_out_of_range_limit_should_raise
       Person.connection.drop_table :test_limits rescue nil
-      assert_raise(ActiveRecord::ActiveRecordError, "integer limit didn't raise") do
+      e = assert_raise(ActiveRecord::ActiveRecordError, "integer limit didn't raise") do
         Person.connection.create_table :test_integer_limits, :force => true do |t|
           t.column :bigone, :integer, :limit => 10
         end
       end
+
+      assert_match(/No integer type has byte size 10/, e.message)
 
       unless current_adapter?(:PostgreSQLAdapter)
         assert_raise(ActiveRecord::ActiveRecordError, "text limit didn't raise") do
@@ -718,6 +717,8 @@ if ActiveRecord::Base.connection.supports_bulk_alter?
 end
 
 class CopyMigrationsTest < ActiveRecord::TestCase
+  include ActiveSupport::Testing::Stream
+
   def setup
   end
 
@@ -927,13 +928,4 @@ class CopyMigrationsTest < ActiveRecord::TestCase
     ActiveRecord::Base.logger = old
   end
 
-  private
-
-  def quietly
-    silence_stream(STDOUT) do
-      silence_stream(STDERR) do
-        yield
-      end
-    end
-  end
 end

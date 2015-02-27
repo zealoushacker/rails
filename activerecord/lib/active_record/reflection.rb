@@ -149,19 +149,19 @@ module ActiveRecord
 
       JoinKeys = Struct.new(:key, :foreign_key) # :nodoc:
 
-      def join_keys(assoc_klass)
+      def join_keys(association_klass)
         JoinKeys.new(foreign_key, active_record_primary_key)
       end
 
-      def source_macro
-        ActiveSupport::Deprecation.warn(<<-MSG.squish)
-          ActiveRecord::Base.source_macro is deprecated and will be removed
-          without replacement.
-        MSG
+      def constraints
+        scope_chain.flatten
+      end
 
-        macro
+      def alias_candidate(name)
+        "#{plural_name}_#{name}"
       end
     end
+
     # Base class for AggregateReflection and AssociationReflection. Objects of
     # AggregateReflection and AssociationReflection are returned by the Reflection::ClassMethods.
     #
@@ -343,13 +343,10 @@ module ActiveRecord
         return unless scope
 
         if scope.arity > 0
-          ActiveSupport::Deprecation.warn(<<-MSG.squish)
+          raise ArgumentError, <<-MSG.squish
             The association scope '#{name}' is instance dependent (the scope
-            block takes an argument). Preloading happens before the individual
-            instances are created. This means that there is no instance being
-            passed to the association scope. This will most likely result in
-            broken or incorrect behavior. Joining, Preloading and eager loading
-            of these associations is deprecated and will be removed in the future.
+            block takes an argument). Preloading instance dependent scopes is
+            not supported.
           MSG
         end
       end
@@ -499,7 +496,7 @@ module ActiveRecord
         # returns either nil or the inverse association name that it finds.
         def automatic_inverse_of
           if can_find_inverse_of_automatically?(self)
-            inverse_name = ActiveSupport::Inflector.underscore(options[:as] || active_record.name).to_sym
+            inverse_name = ActiveSupport::Inflector.underscore(options[:as] || active_record.name.demodulize).to_sym
 
             begin
               reflection = klass._reflect_on_association(inverse_name)
@@ -601,8 +598,8 @@ module ActiveRecord
 
       def belongs_to?; true; end
 
-      def join_keys(assoc_klass)
-        key = polymorphic? ? association_primary_key(assoc_klass) : association_primary_key
+      def join_keys(association_klass)
+        key = polymorphic? ? association_primary_key(association_klass) : association_primary_key
         JoinKeys.new(key, foreign_key)
       end
 
@@ -698,6 +695,11 @@ module ActiveRecord
         @chain ||= begin
           a = source_reflection.chain
           b = through_reflection.chain
+
+          if options[:source_type]
+            b[0] = PolymorphicReflection.new(b[0], self)
+          end
+
           chain = a + b
           chain[0] = self # Use self so we don't lose the information from :source_type
           chain
@@ -745,18 +747,8 @@ module ActiveRecord
         end
       end
 
-      def join_keys(assoc_klass)
-        source_reflection.join_keys(assoc_klass)
-      end
-
-      # The macro used by the source association
-      def source_macro
-        ActiveSupport::Deprecation.warn(<<-MSG.squish)
-          ActiveRecord::Base.source_macro is deprecated and will be removed
-          without replacement.
-        MSG
-
-        source_reflection.source_macro
+      def join_keys(association_klass)
+        source_reflection.join_keys(association_klass)
       end
 
       # A through association is nested if there would be more than one join table
@@ -855,6 +847,12 @@ module ActiveRecord
         check_validity_of_inverse!
       end
 
+      def constraints
+        scope_chain = source_reflection.constraints
+        scope_chain << scope if scope
+        scope_chain
+      end
+
       protected
 
         def actual_source_reflection # FIXME: this is a horrible name
@@ -876,6 +874,82 @@ module ActiveRecord
 
         delegate(*delegate_methods, to: :delegate_reflection)
 
+    end
+
+    class PolymorphicReflection < ThroughReflection # :nodoc:
+      def initialize(reflection, previous_reflection)
+        @reflection = reflection
+        @previous_reflection = previous_reflection
+      end
+
+      def klass
+        @reflection.klass
+      end
+
+      def scope
+        @reflection.scope
+      end
+
+      def table_name
+        @reflection.table_name
+      end
+
+      def plural_name
+        @reflection.plural_name
+      end
+
+      def join_keys(association_klass)
+        @reflection.join_keys(association_klass)
+      end
+
+      def type
+        @reflection.type
+      end
+
+      def constraints
+        [source_type_info]
+      end
+
+      def source_type_info
+        type = @previous_reflection.foreign_type
+        source_type = @previous_reflection.options[:source_type]
+        lambda { |object| where(type => source_type) }
+      end
+    end
+
+    class RuntimeReflection < PolymorphicReflection # :nodoc:
+      attr_accessor :next
+
+      def initialize(reflection, association)
+        @reflection = reflection
+        @association = association
+      end
+
+      def klass
+        @association.klass
+      end
+
+      def table_name
+        klass.table_name
+      end
+
+      def constraints
+        @reflection.constraints
+      end
+
+      def source_type_info
+        @reflection.source_type_info
+      end
+
+      def alias_candidate(name)
+        "#{plural_name}_#{name}_join"
+      end
+
+      def alias_name
+        Arel::Table.new(table_name)
+      end
+
+      def all_includes; yield; end
     end
   end
 end

@@ -15,9 +15,9 @@ require 'models/treasure'
 class NumericData < ActiveRecord::Base
   self.table_name = 'numeric_data'
 
-  attribute :world_population, Type::Integer.new
-  attribute :my_house_population, Type::Integer.new
-  attribute :atoms_in_universe, Type::Integer.new
+  attribute :world_population, :integer
+  attribute :my_house_population, :integer
+  attribute :atoms_in_universe, :integer
 end
 
 class CalculationsTest < ActiveRecord::TestCase
@@ -630,5 +630,10 @@ class CalculationsTest < ActiveRecord::TestCase
     part.trinkets.create!
 
     assert_equal({ "has trinket" => part.id }, ShipPart.joins(:trinkets).group("ship_parts.name").sum(:id))
+  end
+
+  def test_calculation_grouped_by_association_doesnt_error_when_no_records_have_association
+    Client.update_all(client_of: nil)
+    assert_equal({ nil => Client.count }, Client.group(:firm).count)
   end
 end

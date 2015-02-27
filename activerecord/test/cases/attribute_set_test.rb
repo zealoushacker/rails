@@ -65,6 +65,16 @@ module ActiveRecord
       assert_equal({ foo: 1, bar: 2.2 }, attributes.to_h)
     end
 
+    test "to_hash maintains order" do
+      builder = AttributeSet::Builder.new(foo: Type::Integer.new, bar: Type::Float.new)
+      attributes = builder.build_from_database(foo: '2.2', bar: '3.3')
+
+      attributes[:bar]
+      hash = attributes.to_h
+
+      assert_equal [[:foo, 2], [:bar, 3.3]], hash.to_a
+    end
+
     test "values_before_type_cast" do
       builder = AttributeSet::Builder.new(foo: Type::Integer.new, bar: Type::Integer.new)
       attributes = builder.build_from_database(foo: '1.1', bar: '2.2')
@@ -141,12 +151,12 @@ module ActiveRecord
     end
 
     class MyType
-      def type_cast_from_user(value)
+      def cast(value)
         return if value.nil?
         value + " from user"
       end
 
-      def type_cast_from_database(value)
+      def deserialize(value)
         return if value.nil?
         value + " from database"
       end
@@ -185,6 +195,17 @@ module ActiveRecord
 
       attributes.freeze
       assert_equal({ foo: "1" }, attributes.to_hash)
+    end
+
+    test "#accessed_attributes returns only attributes which have been read" do
+      builder = AttributeSet::Builder.new(foo: Type::Value.new, bar: Type::Value.new)
+      attributes = builder.build_from_database(foo: "1", bar: "2")
+
+      assert_equal [], attributes.accessed
+
+      attributes.fetch_value(:foo)
+
+      assert_equal [:foo], attributes.accessed
     end
   end
 end

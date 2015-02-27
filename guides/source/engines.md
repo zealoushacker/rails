@@ -1,3 +1,5 @@
+**DO NOT READ THIS FILE ON GITHUB, GUIDES ARE PUBLISHED ON http://guides.rubyonrails.org.**
+
 Getting Started with Engines
 ============================
 
@@ -888,7 +890,9 @@ engine this would be done by changing
 `app/controllers/blorgh/application_controller.rb` to look like:
 
 ```ruby
-class Blorgh::ApplicationController < ApplicationController
+module Blorgh
+  class ApplicationController < ::ApplicationController
+  end
 end
 ```
 

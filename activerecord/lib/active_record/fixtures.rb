@@ -1,6 +1,7 @@
 require 'erb'
 require 'yaml'
 require 'zlib'
+require 'set'
 require 'active_support/dependencies'
 require 'active_support/core_ext/digest/uuid'
 require 'active_record/fixture_set/file'
@@ -131,7 +132,7 @@ module ActiveRecord
   #         Digest::SHA2.hexdigest(File.read(Rails.root.join('test/fixtures', path)))
   #       end
   #     end
-  #     ActiveRecord::FixtureSet.context_class.send :include, FixtureFileHelpers
+  #     ActiveRecord::FixtureSet.context_class.include FixtureFileHelpers
   #
   # - use the helper method in a fixture
   #     photo:
@@ -521,12 +522,16 @@ module ActiveRecord
           update_all_loaded_fixtures fixtures_map
 
           connection.transaction(:requires_new => true) do
+            deleted_tables = Set.new
             fixture_sets.each do |fs|
               conn = fs.model_class.respond_to?(:connection) ? fs.model_class.connection : connection
               table_rows = fs.table_rows
 
               table_rows.each_key do |table|
-                conn.delete "DELETE FROM #{conn.quote_table_name(table)}", 'Fixture Delete'
+                unless deleted_tables.include? table
+                  conn.delete "DELETE FROM #{conn.quote_table_name(table)}", 'Fixture Delete'
+                end
+                deleted_tables << table
               end
 
               table_rows.each do |fixture_set_name, rows|
@@ -633,7 +638,7 @@ module ActiveRecord
 
           # interpolate the fixture label
           row.each do |key, value|
-            row[key] = value.gsub("$LABEL", label) if value.is_a?(String)
+            row[key] = value.gsub("$LABEL", label.to_s) if value.is_a?(String)
           end
 
           # generate a primary key if necessary
@@ -661,7 +666,7 @@ module ActiveRecord
                   row[association.foreign_type] = $1
                 end
 
-                fk_type = association.active_record.columns_hash[fk_name].type
+                fk_type = association.active_record.type_for_attribute(fk_name).type
                 row[fk_name] = ActiveRecord::FixtureSet.identify(value, fk_type)
               end
             when :has_many
@@ -691,7 +696,7 @@ module ActiveRecord
       end
 
       def primary_key_type
-        @association.klass.column_types[@association.klass.primary_key].type
+        @association.klass.type_for_attribute(@association.klass.primary_key).type
       end
     end
 
@@ -703,6 +708,10 @@ module ActiveRecord
       def lhs_key
         @association.through_reflection.foreign_key
       end
+
+      def join_table
+        @association.through_reflection.table_name
+      end
     end
 
     private
@@ -711,7 +720,7 @@ module ActiveRecord
       end
 
       def primary_key_type
-        @primary_key_type ||= model_class && model_class.column_types[model_class.primary_key].type
+        @primary_key_type ||= model_class && model_class.type_for_attribute(model_class.primary_key).type
       end
 
       def add_join_records(rows, row, association)
@@ -767,12 +776,6 @@ module ActiveRecord
       end
 
   end
-
-  #--
-  # Deprecate 'Fixtures' in favor of 'FixtureSet'.
-  #++
-  # :nodoc:
-  Fixtures = ActiveSupport::Deprecation::DeprecatedConstantProxy.new('ActiveRecord::Fixtures', 'ActiveRecord::FixtureSet')
 
   class Fixture #:nodoc:
     include Enumerable
@@ -888,7 +891,7 @@ module ActiveRecord
               @fixture_cache[fs_name] ||= {}
 
               instances = fixture_names.map do |f_name|
-                f_name = f_name.to_s
+                f_name = f_name.to_s if f_name.is_a?(Symbol)
                 @fixture_cache[fs_name].delete(f_name) if force_reload
 
                 if @loaded_fixtures[fs_name][f_name]

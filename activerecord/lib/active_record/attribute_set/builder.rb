@@ -20,7 +20,7 @@ module ActiveRecord
   end
 
   class LazyAttributeHash # :nodoc:
-    delegate :select, :transform_values, to: :materialize
+    delegate :transform_values, :each_key, to: :materialize
 
     def initialize(types, values, additional_types)
       @types = types
@@ -45,13 +45,19 @@ module ActiveRecord
       delegate_hash[key] = value
     end
 
-    def initialized_keys
-      delegate_hash.keys | values.keys
-    end
-
     def initialize_dup(_)
       @delegate_hash = delegate_hash.transform_values(&:dup)
       super
+    end
+
+    def select
+      keys = types.keys | values.keys | delegate_hash.keys
+      keys.each_with_object({}) do |key, hash|
+        attribute = self[key]
+        if yield(key, attribute)
+          hash[key] = attribute
+        end
+      end
     end
 
     protected

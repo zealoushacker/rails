@@ -63,7 +63,7 @@ module ActiveRecord
       def ids_writer(ids)
         pk_type = reflection.primary_key_type
         ids = Array(ids).reject(&:blank?)
-        ids.map! { |i| pk_type.type_cast_from_user(i) }
+        ids.map! { |i| pk_type.cast(i) }
         replace(klass.find(ids).index_by(&:id).values_at(*ids))
       end
 
@@ -129,6 +129,16 @@ module ActiveRecord
         first_nth_or_last(:last, *args)
       end
 
+      def take
+        if loaded?
+          target.first
+        else
+          scope.take.tap do |record|
+            set_inverse_instance record if record.is_a? ActiveRecord::Base
+          end
+        end
+      end
+
       def build(attributes = {}, &block)
         if attributes.is_a?(Array)
           attributes.collect { |attr| build(attr, &block) }
@@ -151,6 +161,7 @@ module ActiveRecord
       # be chained. Since << flattens its argument list and inserts each record,
       # +push+ and +concat+ behave identically.
       def concat(*records)
+        records = records.flatten
         if owner.new_record?
           load_target
           concat_records(records)
@@ -218,11 +229,7 @@ module ActiveRecord
 
       # Count all records using SQL.  Construct options and pass them with
       # scope to the target class's +count+.
-      def count(column_name = nil, count_options = {})
-        # TODO: Remove count_options argument as soon we remove support to
-        # activerecord-deprecated_finders.
-        column_name, count_options = nil, column_name if column_name.is_a?(Hash)
-
+      def count(column_name = nil)
         relation = scope
         if association_scope.distinct_value
           # This is needed because 'SELECT count(DISTINCT *)..' is not valid SQL.
@@ -322,7 +329,8 @@ module ActiveRecord
       end
 
       # Returns true if the collections is not empty.
-      # Equivalent to +!collection.empty?+.
+      # If block given, loads all records and checks for one or more matches.
+      # Otherwise, equivalent to +!collection.empty?+.
       def any?
         if block_given?
           load_target.any? { |*block_args| yield(*block_args) }
@@ -332,7 +340,8 @@ module ActiveRecord
       end
 
       # Returns true if the collection has more than 1 record.
-      # Equivalent to +collection.size > 1+.
+      # If block given, loads all records and checks for two or more matches.
+      # Otherwise, equivalent to +collection.size > 1+.
       def many?
         if block_given?
           load_target.many? { |*block_args| yield(*block_args) }
@@ -553,7 +562,7 @@ module ActiveRecord
         def concat_records(records, should_raise = false)
           result = true
 
-          records.flatten.each do |record|
+          records.each do |record|
             raise_on_type_mismatch!(record)
             add_to_target(record) do |rec|
               result &&= insert_record(rec, true, should_raise) unless owner.new_record?
@@ -597,8 +606,8 @@ module ActiveRecord
           if reflection.is_a?(ActiveRecord::Reflection::ThroughReflection)
             assoc = owner.association(reflection.through_reflection.name)
             assoc.reader.any? { |source|
-              target = source.send(reflection.source_reflection.name)
-              target.respond_to?(:include?) ? target.include?(record) : target == record
+              target_reflection = source.send(reflection.source_reflection.name)
+              target_reflection.respond_to?(:include?) ? target_reflection.include?(record) : target_reflection == record
             } || target.include?(record)
           else
             target.include?(record)

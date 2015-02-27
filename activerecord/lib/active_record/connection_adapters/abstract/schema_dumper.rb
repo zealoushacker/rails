@@ -12,6 +12,12 @@ module ActiveRecord
         spec
       end
 
+      def column_spec_for_primary_key(column)
+        return if column.type == :integer
+        spec = { id: column.type.inspect }
+        spec.merge!(prepare_column_options(column).delete_if { |key, _| [:name, :type].include?(key) })
+      end
+
       # This can be overridden on a Adapter level basis to support other
       # extended datatypes (Example: Adding an array option in the
       # PostgreSQLAdapter)
@@ -40,9 +46,10 @@ module ActiveRecord
       private
 
       def schema_default(column)
-        default = column.type_cast_from_database(column.default)
+        type = lookup_cast_type_from_column(column)
+        default = type.deserialize(column.default)
         unless default.nil?
-          column.type_cast_for_schema(default)
+          type.type_cast_for_schema(default)
         end
       end
     end

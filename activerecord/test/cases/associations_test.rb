@@ -43,28 +43,6 @@ class AssociationsTest < ActiveRecord::TestCase
     assert_equal favs, fav2
   end
 
-  def test_clear_association_cache_stored
-    firm = Firm.find(1)
-    assert_kind_of Firm, firm
-
-    firm.clear_association_cache
-    assert_equal Firm.find(1).clients.collect(&:name).sort, firm.clients.collect(&:name).sort
-  end
-
-  def test_clear_association_cache_new_record
-     firm            = Firm.new
-     client_stored   = Client.find(3)
-     client_new      = Client.new
-     client_new.name = "The Joneses"
-     clients         = [ client_stored, client_new ]
-
-     firm.clients    << clients
-     assert_equal clients.map(&:name).to_set, firm.clients.map(&:name).to_set
-
-     firm.clear_association_cache
-     assert_equal clients.map(&:name).to_set, firm.clients.map(&:name).to_set
-  end
-
   def test_loading_the_association_target_should_keep_child_records_marked_for_destruction
     ship = Ship.create!(:name => "The good ship Dollypop")
     part = ship.parts.create!(:name => "Mast")
@@ -141,7 +119,7 @@ class AssociationsTest < ActiveRecord::TestCase
 
   def test_association_with_references
     firm = companies(:first_firm)
-    assert_equal ['foo'], firm.association_with_references.references_values
+    assert_includes firm.association_with_references.references_values, 'foo'
   end
 
 end
@@ -238,7 +216,7 @@ class AssociationProxyTest < ActiveRecord::TestCase
   end
 
   def test_scoped_allows_conditions
-    assert developers(:david).projects.merge!(where: 'foo').where_values.include?('foo')
+    assert developers(:david).projects.merge(where: 'foo').to_sql.include?('foo')
   end
 
   test "getting a scope from an association" do
@@ -262,6 +240,11 @@ class AssociationProxyTest < ActiveRecord::TestCase
     assert_queries(1) do
       assert_equal man, man.interests.where("1=1").first.man
     end
+  end
+
+  test "first! works on loaded associations" do
+    david = authors(:david)
+    assert_equal david.posts.first, david.posts.reload.first!
   end
 
   def test_reset_unloads_target

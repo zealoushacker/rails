@@ -38,6 +38,10 @@ module Rails
         class_option :skip_keeps,         type: :boolean, default: false,
                                           desc: 'Skip source control .keep files'
 
+        class_option :skip_action_mailer, type: :boolean, aliases: "-M",
+                                          default: false,
+                                          desc: "Skip Action Mailer files"
+
         class_option :skip_active_record, type: :boolean, aliases: '-O', default: false,
                                           desc: 'Skip Active Record files'
 
@@ -65,8 +69,8 @@ module Rails
         class_option :skip_turbolinks,    type: :boolean, default: false,
                                           desc: 'Skip turbolinks gem'
 
-        class_option :skip_test_unit,     type: :boolean, aliases: '-T', default: false,
-                                          desc: 'Skip Test::Unit files'
+        class_option :skip_test,          type: :boolean, aliases: '-T', default: false,
+                                          desc: 'Skip test files'
 
         class_option :rc,                 type: :string, default: false,
                                           desc: "Path to file containing extra configuration options for rails command"
@@ -109,9 +113,7 @@ module Rails
          assets_gemfile_entry,
          javascript_gemfile_entry,
          jbuilder_gemfile_entry,
-         sdoc_gemfile_entry,
          psych_gemfile_entry,
-         console_gemfile_entry,
          @extra_entries].flatten.find_all(&@gem_filter)
       end
 
@@ -124,7 +126,7 @@ module Rails
       def builder
         @builder ||= begin
           builder_class = get_builder_class
-          builder_class.send(:include, ActionMethods)
+          builder_class.include(ActionMethods)
           builder_class.new(self)
         end
       end
@@ -165,7 +167,7 @@ module Rails
       end
 
       def include_all_railties?
-        !options[:skip_active_record] && !options[:skip_test_unit] && !options[:skip_sprockets]
+        options.values_at(:skip_active_record, :skip_action_mailer, :skip_test, :skip_sprockets).none?
       end
 
       def comment_if(value)
@@ -247,13 +249,8 @@ module Rails
         return [] if options[:skip_sprockets]
 
         gems = []
-        if options.dev? || options.edge?
-          gems << GemfileEntry.github('sass-rails', 'rails/sass-rails', nil,
-                                    'Use SCSS for stylesheets')
-        else
-          gems << GemfileEntry.version('sass-rails', '~> 4.0',
+        gems << GemfileEntry.version('sass-rails', '~> 5.0',
                                      'Use SCSS for stylesheets')
-        end
 
         gems << GemfileEntry.version('uglifier',
                                    '>= 1.3.0',
@@ -265,20 +262,6 @@ module Rails
       def jbuilder_gemfile_entry
         comment = 'Build JSON APIs with ease. Read more: https://github.com/rails/jbuilder'
         GemfileEntry.version('jbuilder', '~> 2.0', comment)
-      end
-
-      def sdoc_gemfile_entry
-        comment = 'bundle exec rake doc:rails generates the API under doc/api.'
-        GemfileEntry.new('sdoc', '~> 0.4.0', comment, group: :doc)
-      end
-
-      def console_gemfile_entry
-        comment = 'Use Rails Console on the Browser'
-        if options.dev? || options.edge?
-          GemfileEntry.github 'web-console', 'rails/web-console', nil, comment
-        else
-          []
-        end
       end
 
       def coffee_gemfile_entry

@@ -156,10 +156,10 @@ module Rails
         args << "--help" if args.empty? && klass.arguments.any?(&:required?)
         klass.start(args, config)
       else
-        options     = sorted_groups.map(&:last).flatten
+        options     = sorted_groups.flat_map(&:last)
         suggestions = options.sort_by {|suggested| levenshtein_distance(namespace.to_s, suggested) }.first(3)
         msg =  "Could not find generator '#{namespace}'. "
-        msg << "Maybe you meant #{ suggestions.map {|s| "'#{s}'"}.join(" or ") }\n"
+        msg << "Maybe you meant #{ suggestions.map {|s| "'#{s}'"}.to_sentence(last_word_connector: " or ") }\n"
         msg << "Run `rails generate --help` for more options."
         puts msg
       end
@@ -260,11 +260,9 @@ module Rails
         t = str2
         n = s.length
         m = t.length
-        max = n/2
 
         return m if (0 == n)
         return n if (0 == m)
-        return n if (n - m).abs > max
 
         d = (0..m).to_a
         x = nil
@@ -286,7 +284,7 @@ module Rails
           d[m] = x
         end
 
-        return x
+        x
       end
 
       # Prints a list of generators.

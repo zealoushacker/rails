@@ -53,10 +53,8 @@ module ActionController
     # In your integration tests, you can do something like this:
     #
     #   def test_access_granted_from_xml
-    #     get(
-    #       "/notes/1.xml", nil,
-    #       'HTTP_AUTHORIZATION' => ActionController::HttpAuthentication::Basic.encode_credentials(users(:dhh).name, users(:dhh).password)
-    #     )
+    #     @request.env['HTTP_AUTHORIZATION'] = ActionController::HttpAuthentication::Basic.encode_credentials(users(:dhh).name, users(:dhh).password)
+    #     get "/notes/1.xml"
     #
     #     assert_equal 200, status
     #   end
@@ -108,11 +106,11 @@ module ActionController
       end
 
       def auth_scheme(request)
-        request.authorization.split(' ', 2).first
+        request.authorization.to_s.split(' ', 2).first
       end
 
       def auth_param(request)
-        request.authorization.split(' ', 2).second
+        request.authorization.to_s.split(' ', 2).second
       end
 
       def encode_credentials(user_name, password)

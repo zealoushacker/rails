@@ -39,7 +39,7 @@ module ActiveRecord
 
   class PendingMigrationError < MigrationError#:nodoc:
     def initialize
-      if defined?(Rails)
+      if defined?(Rails.env)
         super("Migrations are pending. To resolve this issue, run:\n\n\tbin/rake db:migrate RAILS_ENV=#{::Rails.env}")
       else
         super("Migrations are pending. To resolve this issue, run:\n\n\tbin/rake db:migrate")
@@ -168,7 +168,7 @@ module ActiveRecord
   # This will generate the file <tt>timestamp_add_fieldname_to_tablename</tt>, which will look like this:
   #   class AddFieldnameToTablename < ActiveRecord::Migration
   #     def change
-  #       add_column :tablenames, :field, :string
+  #       add_column :tablenames, :fieldname, :string
   #     end
   #   end
   #
@@ -395,7 +395,7 @@ module ActiveRecord
 
       def load_schema_if_pending!
         if ActiveRecord::Migrator.needs_migration? || !ActiveRecord::Migrator.any_migrations?
-          # Roundrip to Rake to allow plugins to hook into database initialization.
+          # Roundtrip to Rake to allow plugins to hook into database initialization.
           FileUtils.cd Rails.root do
             current_config = Base.connection_config
             Base.clear_all_connections!

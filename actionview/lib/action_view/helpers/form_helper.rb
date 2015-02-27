@@ -4,6 +4,7 @@ require 'action_view/helpers/tag_helper'
 require 'action_view/helpers/form_tag_helper'
 require 'action_view/helpers/active_model_helper'
 require 'action_view/model_naming'
+require 'action_view/record_identifier'
 require 'active_support/core_ext/module/attribute_accessors'
 require 'active_support/core_ext/hash/slice'
 require 'active_support/core_ext/string/output_safety'
@@ -110,6 +111,7 @@ module ActionView
       include FormTagHelper
       include UrlHelper
       include ModelNaming
+      include RecordIdentifier
 
       # Creates a form that allows the user to create or update the attributes
       # of a specific model object.
@@ -854,6 +856,24 @@ module ActionView
       #
       #   file_field(:attachment, :file, class: 'file_input')
       #   # => <input type="file" id="attachment_file" name="attachment[file]" class="file_input" />
+      #
+      # ==== Gotcha
+      #
+      # The HTML specification says that when a file field is empty, web browsers
+      # do not send any value to the server. Unfortunately this introduces a
+      # gotcha: if a +User+ model has an +avatar+ field, and no file is selected,
+      # then the +avatar+ parameter is empty. Thus, any mass-assignment idiom like
+      #
+      #   @user.update(params[:user])
+      #
+      # wouldn't update the +avatar+ field.
+      #
+      # To prevent this, the helper generates an auxiliary hidden field before
+      # every file field. The hidden field has the same name as the file one and
+      # a blank value.
+      #
+      # In case you don't want the helper to generate this hidden field you can
+      # specify the <tt>include_hidden: false</tt> option.
       def file_field(object_name, method, options = {})
         Tags::FileField.new(object_name, method, self, options).render
       end
@@ -1206,11 +1226,11 @@ module ActionView
             object_name = model_name_from_record_or_class(object).param_key
           end
 
-          builder = options[:builder] || default_form_builder
+          builder = options[:builder] || default_form_builder_class
           builder.new(object_name, object, self, options)
         end
 
-        def default_form_builder
+        def default_form_builder_class
           builder = ActionView::Base.default_form_builder
           builder.respond_to?(:constantize) ? builder.constantize : builder
         end
@@ -1226,7 +1246,7 @@ module ActionView
     #     Admin: <%= person_form.check_box :admin %>
     #   <% end %>
     #
-    # In the above block, the a +FormBuilder+ object is yielded as the
+    # In the above block, a +FormBuilder+ object is yielded as the
     # +person_form+ variable. This allows you to generate the +text_field+
     # and +check_box+ fields by specifying their eponymous methods, which
     # modify the underlying template and associates the +@person+ model object
@@ -1247,6 +1267,7 @@ module ActionView
     #         )
     #       )
     #     end
+    #   end
     #
     # The above code creates a new method +div_radio_button+ which wraps a div
     # around the new radio button. Note that when options are passed in, you

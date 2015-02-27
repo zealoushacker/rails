@@ -77,7 +77,15 @@ class EagerAssociationTest < ActiveRecord::TestCase
 
   def test_has_many_through_with_order
     authors = Author.includes(:favorite_authors).to_a
+    assert authors.count > 0
     assert_no_queries { authors.map(&:favorite_authors) }
+  end
+
+  def test_eager_loaded_has_one_association_with_references_does_not_run_additional_queries
+    Post.update_all(author_id: nil)
+    authors = Author.includes(:post).references(:post).to_a
+    assert authors.count > 0
+    assert_no_queries { authors.map(&:post) }
   end
 
   def test_with_two_tables_in_from_without_getting_double_quoted
@@ -826,18 +834,6 @@ class EagerAssociationTest < ActiveRecord::TestCase
     )
   end
 
-  def test_preload_with_interpolation
-    assert_deprecated do
-      post = Post.includes(:comments_with_interpolated_conditions).find(posts(:welcome).id)
-      assert_equal [comments(:greetings)], post.comments_with_interpolated_conditions
-    end
-
-    assert_deprecated do
-      post = Post.joins(:comments_with_interpolated_conditions).find(posts(:welcome).id)
-      assert_equal [comments(:greetings)], post.comments_with_interpolated_conditions
-    end
-  end
-
   def test_polymorphic_type_condition
     post = Post.all.merge!(:includes => :taggings).find(posts(:thinking).id)
     assert post.taggings.include?(taggings(:thinking_general))
@@ -1294,23 +1290,22 @@ class EagerAssociationTest < ActiveRecord::TestCase
     assert_equal pets(:parrot), Owner.including_last_pet.first.last_pet
   end
 
-  test "include instance dependent associations is deprecated" do
+  test "preloading and eager loading of instance dependent associations is not supported" do
     message = "association scope 'posts_with_signature' is"
-    assert_deprecated message do
-      begin
-        Author.includes(:posts_with_signature).to_a
-      rescue NoMethodError
-        # it's expected that preloading of this association fails
-      end
+    error = assert_raises(ArgumentError) do
+      Author.includes(:posts_with_signature).to_a
     end
+    assert_match message, error.message
 
-    assert_deprecated message do
-      Author.preload(:posts_with_signature).to_a rescue NoMethodError
+    error = assert_raises(ArgumentError) do
+      Author.preload(:posts_with_signature).to_a
     end
+    assert_match message, error.message
 
-    assert_deprecated message do
+    error = assert_raises(ArgumentError) do
       Author.eager_load(:posts_with_signature).to_a
     end
+    assert_match message, error.message
   end
 
   test "preloading readonly association" do
@@ -1328,7 +1323,6 @@ class EagerAssociationTest < ActiveRecord::TestCase
   end
 
   test "eager-loading readonly association" do
-    skip "eager_load does not yet preserve readonly associations"
     # has-one
     firm = Firm.where(id: "1").eager_load(:readonly_account).first!
     assert firm.readonly_account.readonly?
@@ -1340,6 +1334,10 @@ class EagerAssociationTest < ActiveRecord::TestCase
     # has-many :through
     david = Author.where(id: "1").eager_load(:readonly_comments).first!
     assert david.readonly_comments.first.readonly?
+
+    # belongs_to
+    post = Post.where(id: "1").eager_load(:author).first!
+    assert post.author.readonly?
   end
 
   test "preloading a polymorphic association with references to the associated table" do

@@ -5,41 +5,8 @@ module ActiveRecord
         private
 
         def visit_ColumnDefinition(o)
-          sql = super
-          if o.primary_key? && o.type != :primary_key
-            sql << " PRIMARY KEY "
-            add_column_options!(sql, column_options(o))
-          end
-          sql
-        end
-
-        def column_options(o)
-          column_options = super
-          column_options[:array] = o.array
-          column_options
-        end
-
-        def add_column_options!(sql, options)
-          if options[:array]
-            sql << '[]'
-          end
+          o.sql_type = type_to_sql(o.type, o.limit, o.precision, o.scale, o.array)
           super
-        end
-
-        def quote_default_expression(value, column)
-          if column.type == :uuid && value =~ /\(\)/
-            value
-          else
-            super
-          end
-        end
-
-        def type_for_column(column)
-          if column.array
-            @conn.lookup_cast_type("#{column.sql_type}[]")
-          else
-            super
-          end
         end
       end
 
@@ -120,6 +87,10 @@ module ActiveRecord
           SQL
         end
 
+        def drop_table(table_name, options = {})
+          execute "DROP TABLE#{' IF EXISTS' if options[:if_exists]} #{quote_table_name(table_name)}#{' CASCADE' if options[:force] == :cascade}"
+        end
+
         # Returns true if schema exists.
         def schema_exists?(name)
           exec_query(<<-SQL, 'SCHEMA').rows.first[0].to_i > 0
@@ -188,15 +159,17 @@ module ActiveRecord
         def columns(table_name)
           # Limit, precision, and scale are all handled by the superclass.
           column_definitions(table_name).map do |column_name, type, default, notnull, oid, fmod|
-            oid = get_oid_type(oid.to_i, fmod.to_i, column_name, type)
-            default_value = extract_value_from_default(oid, default)
+            oid = oid.to_i
+            fmod = fmod.to_i
+            type_metadata = fetch_type_metadata(column_name, type, oid, fmod)
+            default_value = extract_value_from_default(default)
             default_function = extract_default_function(default_value, default)
-            new_column(column_name, default_value, oid, type, notnull == 'f', default_function)
+            new_column(column_name, default_value, type_metadata, notnull == 'f', default_function)
           end
         end
 
-        def new_column(name, default, cast_type, sql_type = nil, null = true, default_function = nil) # :nodoc:
-          PostgreSQLColumn.new(name, default, cast_type, sql_type, null, default_function)
+        def new_column(name, default, sql_type_metadata = nil, null = true, default_function = nil) # :nodoc:
+          PostgreSQLColumn.new(name, default, sql_type_metadata, null, default_function)
         end
 
         # Returns the current database name.
@@ -390,15 +363,15 @@ module ActiveRecord
 
         # Returns just a table's primary key
         def primary_key(table)
-          row = exec_query(<<-end_sql, 'SCHEMA').rows.first
+          pks = exec_query(<<-end_sql, 'SCHEMA').rows
             SELECT attr.attname
             FROM pg_attribute attr
-            INNER JOIN pg_constraint cons ON attr.attrelid = cons.conrelid AND attr.attnum = cons.conkey[1]
+            INNER JOIN pg_constraint cons ON attr.attrelid = cons.conrelid AND attr.attnum = any(cons.conkey)
             WHERE cons.contype = 'p'
               AND cons.conrelid = '#{quote_table_name(table)}'::regclass
           end_sql
-
-          row && row.first
+          return nil unless pks.count == 1
+          pks[0][0]
         end
 
         # Renames a table.
@@ -433,12 +406,14 @@ module ActiveRecord
         def change_column(table_name, column_name, type, options = {})
           clear_cache!
           quoted_table_name = quote_table_name(table_name)
-          sql_type = type_to_sql(type, options[:limit], options[:precision], options[:scale])
-          sql_type << "[]" if options[:array]
-          sql = "ALTER TABLE #{quoted_table_name} ALTER COLUMN #{quote_column_name(column_name)} TYPE #{sql_type}"
-          sql << " USING #{options[:using]}" if options[:using]
-          if options[:cast_as]
-            sql << " USING CAST(#{quote_column_name(column_name)} AS #{type_to_sql(options[:cast_as], options[:limit], options[:precision], options[:scale])})"
+          quoted_column_name = quote_column_name(column_name)
+          sql_type = type_to_sql(type, options[:limit], options[:precision], options[:scale], options[:array])
+          sql = "ALTER TABLE #{quoted_table_name} ALTER COLUMN #{quoted_column_name} TYPE #{sql_type}"
+          if options[:using]
+            sql << " USING #{options[:using]}"
+          elsif options[:cast_as]
+            cast_as_type = type_to_sql(options[:cast_as], options[:limit], options[:precision], options[:scale], options[:array])
+            sql << " USING CAST(#{quoted_column_name} AS #{cast_as_type})"
           end
           execute sql
 
@@ -458,7 +433,7 @@ module ActiveRecord
             # cast the default to the columns type, which leaves us with a default like "default NULL::character varying".
             execute alter_column_query % "DROP DEFAULT"
           else
-            execute alter_column_query % "SET DEFAULT #{quote_default_value(default, column)}"
+            execute alter_column_query % "SET DEFAULT #{quote_default_expression(default, column)}"
           end
         end
 
@@ -466,7 +441,7 @@ module ActiveRecord
           clear_cache!
           unless null || default.nil?
             column = column_for(table_name, column_name)
-            execute("UPDATE #{quote_table_name(table_name)} SET #{quote_column_name(column_name)}=#{quote_default_value(default, column)} WHERE #{quote_column_name(column_name)} IS NULL") if column
+            execute("UPDATE #{quote_table_name(table_name)} SET #{quote_column_name(column_name)}=#{quote_default_expression(default, column)} WHERE #{quote_column_name(column_name)} IS NULL") if column
           end
           execute("ALTER TABLE #{quote_table_name(table_name)} ALTER #{quote_column_name(column_name)} #{null ? 'DROP' : 'SET'} NOT NULL")
         end
@@ -488,9 +463,8 @@ module ActiveRecord
         end
 
         def rename_index(table_name, old_name, new_name)
-          if new_name.length > allowed_index_name_length
-            raise ArgumentError, "Index name '#{new_name}' on table '#{table_name}' is too long; the limit is #{allowed_index_name_length} characters"
-          end
+          validate_index_length!(table_name, new_name)
+
           execute "ALTER INDEX #{quote_column_name(old_name)} RENAME TO #{quote_table_name(new_name)}"
         end
 
@@ -536,8 +510,8 @@ module ActiveRecord
         end
 
         # Maps logical Rails types to PostgreSQL-specific data types.
-        def type_to_sql(type, limit = nil, precision = nil, scale = nil)
-          case type.to_s
+        def type_to_sql(type, limit = nil, precision = nil, scale = nil, array = nil)
+          sql = case type.to_s
           when 'binary'
             # PostgreSQL doesn't support limits on binary (bytea) columns.
             # The hard limit is 1Gb, because of a 32-bit size field, and TOAST.
@@ -553,24 +527,18 @@ module ActiveRecord
             else raise(ActiveRecordError, "The limit on text can be at most 1GB - 1byte.")
             end
           when 'integer'
-            return 'integer' unless limit
-
             case limit
-              when 1, 2; 'smallint'
-              when 3, 4; 'integer'
-              when 5..8; 'bigint'
-              else raise(ActiveRecordError, "No integer type has byte size #{limit}. Use a numeric with precision 0 instead.")
-            end
-          when 'datetime'
-            return super unless precision
-
-            case precision
-              when 0..6; "timestamp(#{precision})"
-              else raise(ActiveRecordError, "No timestamp type has precision of #{precision}. The allowed range of precision is from 0 to 6")
+            when 1, 2; 'smallint'
+            when nil, 3, 4; 'integer'
+            when 5..8; 'bigint'
+            else raise(ActiveRecordError, "No integer type has byte size #{limit}. Use a numeric with precision 0 instead.")
             end
           else
-            super
+            super(type, limit, precision, scale)
           end
+
+          sql << '[]' if array && type != :primary_key
+          sql
         end
 
         # PostgreSQL requires the ORDER BY columns in the select list for distinct queries, and
@@ -585,6 +553,18 @@ module ActiveRecord
             }.reject(&:blank?).map.with_index { |column, i| "#{column} AS alias_#{i}" }
 
           [super, *order_columns].join(', ')
+        end
+
+        def fetch_type_metadata(column_name, sql_type, oid, fmod)
+          cast_type = get_oid_type(oid, fmod, column_name, sql_type)
+          simple_type = SqlTypeMetadata.new(
+            sql_type: sql_type,
+            type: cast_type.type,
+            limit: cast_type.limit,
+            precision: cast_type.precision,
+            scale: cast_type.scale,
+          )
+          PostgreSQLTypeMetadata.new(simple_type, oid: oid, fmod: fmod)
         end
       end
     end

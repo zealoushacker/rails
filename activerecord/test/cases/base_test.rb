@@ -1,4 +1,3 @@
-# encoding: utf-8
 
 require "cases/helper"
 require 'active_support/concurrency/latch'
@@ -88,6 +87,7 @@ class BasicsTest < ActiveRecord::TestCase
       'Mysql2Adapter'     => '`',
       'PostgreSQLAdapter' => '"',
       'OracleAdapter'     => '"',
+      'FbAdapter'         => '"'
     }.fetch(classname) {
       raise "need a bad char for #{classname}"
     }
@@ -111,7 +111,7 @@ class BasicsTest < ActiveRecord::TestCase
     assert_nil Edge.primary_key
   end
 
-  unless current_adapter?(:PostgreSQLAdapter, :OracleAdapter, :SQLServerAdapter)
+  unless current_adapter?(:PostgreSQLAdapter, :OracleAdapter, :SQLServerAdapter, :FbAdapter)
     def test_limit_with_comma
       assert Topic.limit("1,2").to_a
     end
@@ -812,7 +812,6 @@ class BasicsTest < ActiveRecord::TestCase
   def test_dup_does_not_copy_associations
     author = authors(:david)
     assert_not_equal [], author.posts
-    author.send(:clear_association_cache)
 
     author_dup = author.dup
     assert_equal [], author_dup.posts
@@ -903,8 +902,8 @@ class BasicsTest < ActiveRecord::TestCase
   class NumericData < ActiveRecord::Base
     self.table_name = 'numeric_data'
 
-    attribute :my_house_population, Type::Integer.new
-    attribute :atoms_in_universe, Type::Integer.new
+    attribute :my_house_population, :integer
+    attribute :atoms_in_universe, :integer
   end
 
   def test_big_decimal_conditions
@@ -1427,7 +1426,7 @@ class BasicsTest < ActiveRecord::TestCase
     attrs.delete 'id'
 
     typecast = Class.new(ActiveRecord::Type::Value) {
-      def type_cast value
+      def cast value
         "t.lo"
       end
     }

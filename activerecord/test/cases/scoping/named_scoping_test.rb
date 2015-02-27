@@ -317,13 +317,15 @@ class NamedScopingTest < ActiveRecord::TestCase
     ]
 
     conflicts.each do |name|
-      assert_raises(ArgumentError, "scope `#{name}` should not be allowed") do
+      e = assert_raises(ArgumentError, "scope `#{name}` should not be allowed") do
         klass.class_eval { scope name, ->{ where(approved: true) } }
       end
+      assert_match(/You tried to define a scope named \"#{name}\" on the model/, e.message)
 
-      assert_raises(ArgumentError, "scope `#{name}` should not be allowed") do
+      e = assert_raises(ArgumentError, "scope `#{name}` should not be allowed") do
         subklass.class_eval { scope name, ->{ where(approved: true) } }
       end
+      assert_match(/You tried to define a scope named \"#{name}\" on the model/, e.message)
     end
 
     non_conflicts.each do |name|
@@ -380,8 +382,8 @@ class NamedScopingTest < ActiveRecord::TestCase
   end
 
   def test_should_not_duplicates_where_values
-    where_values = Topic.where("1=1").scope_with_lambda.where_values
-    assert_equal ["1=1"], where_values
+    relation = Topic.where("1=1")
+    assert_equal relation.where_clause, relation.scope_with_lambda.where_clause
   end
 
   def test_chaining_with_duplicate_joins

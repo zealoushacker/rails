@@ -2,7 +2,7 @@ ActiveRecord::Schema.define do
 
   %w(postgresql_times postgresql_oids defaults postgresql_timestamp_with_zones
       postgresql_partitioned_table postgresql_partitioned_table_parent).each do |table_name|
-    execute "DROP TABLE IF EXISTS #{quote_table_name table_name}"
+    drop_table table_name, if_exists: true
   end
 
   execute 'DROP SEQUENCE IF EXISTS companies_nonstd_seq CASCADE'
@@ -86,16 +86,6 @@ _SQL
     else
       raise e
     end
-  end
-
-  begin
-    execute <<_SQL
-    CREATE TABLE postgresql_xml_data_type (
-    id SERIAL PRIMARY KEY,
-    data xml
-    );
-_SQL
-  rescue #This version of PostgreSQL either has no XML support or is was not compiled with XML support: skipping table
   end
 
   # This table is to verify if the :limit option is being ignored for text and binary columns

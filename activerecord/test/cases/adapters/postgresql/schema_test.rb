@@ -151,10 +151,10 @@ class SchemaTest < ActiveRecord::TestCase
 
   def test_schema_change_with_prepared_stmt
     altered = false
-    @connection.exec_query "select * from developers where id = $1", 'sql', [[nil, 1]]
+    @connection.exec_query "select * from developers where id = $1", 'sql', [bind_param(1)]
     @connection.exec_query "alter table developers add column zomg int", 'sql', []
     altered = true
-    @connection.exec_query "select * from developers where id = $1", 'sql', [[nil, 1]]
+    @connection.exec_query "select * from developers where id = $1", 'sql', [bind_param(1)]
   ensure
     # We are not using DROP COLUMN IF EXISTS because that syntax is only
     # supported by pg 9.X
@@ -435,6 +435,10 @@ class SchemaTest < ActiveRecord::TestCase
       assert_equal this_index_column, this_index.columns[0]
       assert_equal this_index_name, this_index.name
     end
+
+    def bind_param(value)
+      ActiveRecord::Relation::QueryAttribute.new(nil, value, ActiveRecord::Type::Value.new)
+    end
 end
 
 class SchemaForeignKeyTest < ActiveRecord::TestCase
@@ -454,10 +458,10 @@ class SchemaForeignKeyTest < ActiveRecord::TestCase
     end
     @connection.add_foreign_key "wagons", "my_schema.trains", column: "train_id"
     output = dump_table_schema "wagons"
-    assert_match %r{\s+add_foreign_key "wagons", "my_schema.trains", column: "train_id"$}, output
+    assert_match %r{\s+add_foreign_key "wagons", "my_schema\.trains", column: "train_id"$}, output
   ensure
-    @connection.execute "DROP TABLE IF EXISTS wagons"
-    @connection.execute "DROP TABLE IF EXISTS my_schema.trains"
+    @connection.drop_table "wagons", if_exists: true
+    @connection.drop_table "my_schema.trains", if_exists: true
     @connection.execute "DROP SCHEMA IF EXISTS my_schema"
   end
 end

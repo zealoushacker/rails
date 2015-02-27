@@ -52,12 +52,19 @@ module ActiveRecord
         end
 
         # Does not quote function default values for UUID columns
-        def quote_default_value(value, column) #:nodoc:
+        def quote_default_expression(value, column) #:nodoc:
           if column.type == :uuid && value =~ /\(\)/
             value
+          elsif column.respond_to?(:array?)
+            value = type_cast_from_column(column, value)
+            quote(value)
           else
-            quote(value, column)
+            super
           end
+        end
+
+        def lookup_cast_type_from_column(column) # :nodoc:
+          type_map.lookup(column.oid, column.fmod, column.sql_type)
         end
 
         private

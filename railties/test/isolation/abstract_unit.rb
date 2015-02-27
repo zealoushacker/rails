@@ -11,6 +11,7 @@ require 'fileutils'
 require 'bundler/setup' unless defined?(Bundler)
 require 'active_support'
 require 'active_support/testing/autorun'
+require 'active_support/testing/stream'
 require 'active_support/test_case'
 
 RAILS_FRAMEWORK_ROOT = File.expand_path("#{File.dirname(__FILE__)}/../../..")
@@ -69,7 +70,8 @@ module TestHelpers
 
     def assert_welcome(resp)
       assert_equal 200, resp[0]
-      assert resp[1]["Content-Type"] = "text/html"
+      assert_match 'text/html', resp[1]["Content-Type"]
+      assert_match 'charset=utf-8', resp[1]["Content-Type"]
       assert extract_body(resp).match(/Welcome aboard/)
     end
 
@@ -275,12 +277,6 @@ module TestHelpers
       end
     end
 
-    def gsub_app_file(path, regexp, *args, &block)
-      path = "#{app_path}/#{path}"
-      content = File.read(path).gsub(regexp, *args, &block)
-      File.open(path, 'wb') { |f| f.write(content) }
-    end
-
     def remove_file(path)
       FileUtils.rm_rf "#{app_path}/#{path}"
     end
@@ -309,35 +305,10 @@ class ActiveSupport::TestCase
   include TestHelpers::Paths
   include TestHelpers::Rack
   include TestHelpers::Generation
+  include ActiveSupport::Testing::Stream
 
   self.test_order = :sorted
 
-  private
-
-  def capture(stream)
-    stream = stream.to_s
-    captured_stream = Tempfile.new(stream)
-    stream_io = eval("$#{stream}")
-    origin_stream = stream_io.dup
-    stream_io.reopen(captured_stream)
-
-    yield
-
-    stream_io.rewind
-    return captured_stream.read
-  ensure
-    captured_stream.close
-    captured_stream.unlink
-    stream_io.reopen(origin_stream)
-  end
-
-  def quietly
-    silence_stream(STDOUT) do
-      silence_stream(STDERR) do
-        yield
-      end
-    end
-  end
 end
 
 # Create a scope and build a fixture rails app

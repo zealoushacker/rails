@@ -1,6 +1,4 @@
-# encoding: utf-8
 require 'abstract_unit'
-require 'rbconfig'
 require 'zlib'
 
 module StaticTests

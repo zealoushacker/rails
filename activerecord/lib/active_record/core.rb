@@ -87,15 +87,9 @@ module ActiveRecord
 
       mattr_accessor :maintain_test_schema, instance_accessor: false
 
-      def self.disable_implicit_join_references=(value)
-        ActiveSupport::Deprecation.warn(<<-MSG.squish)
-          Implicit join references were removed with Rails 4.1.
-          Make sure to remove this configuration because it does nothing.
-        MSG
-      end
+      mattr_accessor :belongs_to_required_by_default, instance_accessor: false
 
       class_attribute :default_connection_handler, instance_writer: false
-      class_attribute :find_by_statement_cache
 
       def self.connection_handler
         ActiveRecord::RuntimeRegistry.connection_handler || default_connection_handler
@@ -114,23 +108,23 @@ module ActiveRecord
         super
       end
 
-      def initialize_find_by_cache
-        self.find_by_statement_cache = {}.extend(Mutex_m)
+      def initialize_find_by_cache # :nodoc:
+        @find_by_statement_cache = {}.extend(Mutex_m)
       end
 
-      def inherited(child_class)
+      def inherited(child_class) # :nodoc:
+        # initialize cache at class definition for thread safety
         child_class.initialize_find_by_cache
         super
       end
 
-      def find(*ids)
+      def find(*ids) # :nodoc:
         # We don't have cache keys for this stuff yet
         return super unless ids.length == 1
-        # Allow symbols to super to maintain compatibility for deprecated finders until Rails 5
-        return super if ids.first.kind_of?(Symbol)
         return super if block_given? ||
                         primary_key.nil? ||
                         default_scopes.any? ||
+                        current_scope ||
                         columns_hash.include?(inheritance_column) ||
                         ids.first.kind_of?(Array)
 
@@ -142,14 +136,13 @@ module ActiveRecord
             Please pass the id of the object by calling `.id`
           MSG
         end
+
         key = primary_key
 
-        s = find_by_statement_cache[key] || find_by_statement_cache.synchronize {
-          find_by_statement_cache[key] ||= StatementCache.create(connection) { |params|
-            where(key => params.bind).limit(1)
-          }
+        statement = cached_find_by_statement(key) { |params|
+          where(key => params.bind).limit(1)
         }
-        record = s.execute([id], self, connection).first
+        record = statement.execute([id], self, connection).first
         unless record
           raise RecordNotFound, "Couldn't find #{name} with '#{primary_key}'=#{id}"
         end
@@ -158,7 +151,7 @@ module ActiveRecord
         raise RecordNotFound, "Couldn't find #{name} with an out of range value for '#{primary_key}'"
       end
 
-      def find_by(*args)
+      def find_by(*args) # :nodoc:
         return super if current_scope || !(Hash === args.first) || reflect_on_all_aggregations.any?
         return super if default_scopes.any?
 
@@ -171,19 +164,16 @@ module ActiveRecord
         # We can't cache Post.find_by(author: david) ...yet
         return super unless hash.keys.all? { |k| columns_hash.has_key?(k.to_s) }
 
-        key  = hash.keys
+        keys = hash.keys
 
-        klass = self
-        s = find_by_statement_cache[key] || find_by_statement_cache.synchronize {
-          find_by_statement_cache[key] ||= StatementCache.create(connection) { |params|
-            wheres = key.each_with_object({}) { |param,o|
-              o[param] = params.bind
-            }
-            klass.where(wheres).limit(1)
+        statement = cached_find_by_statement(keys) { |params|
+          wheres = keys.each_with_object({}) { |param, o|
+            o[param] = params.bind
           }
+          where(wheres).limit(1)
         }
         begin
-          s.execute(hash.values, self, connection).first
+          statement.execute(hash.values, self, connection).first
         rescue TypeError => e
           raise ActiveRecord::StatementInvalid.new(e.message, e)
         rescue RangeError
@@ -191,11 +181,11 @@ module ActiveRecord
         end
       end
 
-      def find_by!(*args)
+      def find_by!(*args) # :nodoc:
         find_by(*args) or raise RecordNotFound.new("Couldn't find #{name}")
       end
 
-      def initialize_generated_modules
+      def initialize_generated_modules # :nodoc:
         generated_association_methods
       end
 
@@ -216,7 +206,7 @@ module ActiveRecord
         elsif !connected?
           "#{super} (call '#{super}.connection' to establish a connection)"
         elsif table_exists?
-          attr_list = columns.map { |c| "#{c.name}: #{c.type}" } * ', '
+          attr_list = attribute_types.map { |name, type| "#{name}: #{type.type}" } * ', '
           "#{super}(#{attr_list})"
         else
           "#{super}(Table doesn't exist)"
@@ -234,7 +224,7 @@ module ActiveRecord
       #     scope :published_and_commented, -> { published.and(self.arel_table[:comments_count].gt(0)) }
       #   end
       def arel_table # :nodoc:
-        @arel_table ||= Arel::Table.new(table_name)
+        @arel_table ||= Arel::Table.new(table_name, type_caster: type_caster)
       end
 
       # Returns the Arel engine.
@@ -247,16 +237,34 @@ module ActiveRecord
           end
       end
 
+      def predicate_builder # :nodoc:
+        @predicate_builder ||= PredicateBuilder.new(table_metadata)
+      end
+
+      def type_caster # :nodoc:
+        TypeCaster::Map.new(self)
+      end
+
       private
 
-      def relation #:nodoc:
-        relation = Relation.create(self, arel_table)
+      def cached_find_by_statement(key, &block) # :nodoc:
+        @find_by_statement_cache[key] || @find_by_statement_cache.synchronize {
+          @find_by_statement_cache[key] ||= StatementCache.create(connection, &block)
+        }
+      end
+
+      def relation # :nodoc:
+        relation = Relation.create(self, arel_table, predicate_builder)
 
         if finder_needs_type_condition?
           relation.where(type_condition).create_with(inheritance_column.to_sym => sti_name)
         else
           relation
         end
+      end
+
+      def table_metadata # :nodoc:
+        TableMetadata.new(self, arel_table)
       end
     end
 
@@ -268,16 +276,14 @@ module ActiveRecord
     # ==== Example:
     #   # Instantiates a single new object
     #   User.new(first_name: 'Jamie')
-    def initialize(attributes = nil, options = {})
+    def initialize(attributes = nil)
       @attributes = self.class._default_attributes.dup
+      self.class.define_attribute_methods
 
       init_internals
       initialize_internals_callback
 
-      self.class.define_attribute_methods
-      # +options+ argument is only needed to make protected_attributes gem easier to hook.
-      # Remove it when we drop support to this gem.
-      init_attributes(attributes, options) if attributes
+      assign_attributes(attributes) if attributes
 
       yield self if block_given?
       _run_initialize_callbacks
@@ -340,9 +346,6 @@ module ActiveRecord
       @attributes.reset(self.class.primary_key)
 
       _run_initialize_callbacks
-
-      @aggregation_cache = {}
-      @association_cache = {}
 
       @new_record  = true
       @destroyed   = false
@@ -452,6 +455,7 @@ module ActiveRecord
     # Takes a PP and prettily prints this record to it, allowing you to get a nice result from `pp record`
     # when pp is required.
     def pretty_print(pp)
+      return super if custom_inspect_method_defined?
       pp.object_address_group(self) do
         if defined?(@attributes) && @attributes
           column_names = self.class.column_names.select { |name| has_attribute?(name) || new_record? }
@@ -477,15 +481,15 @@ module ActiveRecord
       Hash[methods.map! { |method| [method, public_send(method)] }].with_indifferent_access
     end
 
+    private
+
     def set_transaction_state(state) # :nodoc:
       @transaction_state = state
     end
 
     def has_transactional_callbacks? # :nodoc:
-      !_rollback_callbacks.empty? || !_commit_callbacks.empty? || !_create_callbacks.empty?
+      !_rollback_callbacks.empty? || !_commit_callbacks.empty? || !_before_commit_callbacks.empty?
     end
-
-    private
 
     # Updates the attributes on this particular ActiveRecord object so that
     # if it is associated with a transaction, then the state of the AR object
@@ -509,6 +513,8 @@ module ActiveRecord
     end
 
     def update_attributes_from_transaction_state(transaction_state, depth)
+      @reflects_state = [false] if depth == 0
+
       if transaction_state && transaction_state.finalized? && !has_transactional_callbacks?
         unless @reflects_state[depth]
           restore_transaction_record_state if transaction_state.rolledback?
@@ -535,8 +541,6 @@ module ActiveRecord
     end
 
     def init_internals
-      @aggregation_cache        = {}
-      @association_cache        = {}
       @readonly                 = false
       @destroyed                = false
       @marked_for_destruction   = false
@@ -545,22 +549,19 @@ module ActiveRecord
       @txn                      = nil
       @_start_transaction_state = {}
       @transaction_state        = nil
-      @reflects_state           = [false]
     end
 
     def initialize_internals_callback
-    end
-
-    # This method is needed to make protected_attributes gem easier to hook.
-    # Remove it when we drop support to this gem.
-    def init_attributes(attributes, options)
-      assign_attributes(attributes)
     end
 
     def thaw
       if frozen?
         @attributes = @attributes.dup
       end
+    end
+
+    def custom_inspect_method_defined?
+      self.class.instance_method(:inspect).owner != ActiveRecord::Base.instance_method(:inspect).owner
     end
   end
 end

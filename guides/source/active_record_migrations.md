@@ -1,3 +1,5 @@
+**DO NOT READ THIS FILE ON GITHUB, GUIDES ARE PUBLISHED ON http://guides.rubyonrails.org.**
+
 Active Record Migrations
 ========================
 
@@ -39,7 +41,7 @@ class CreateProducts < ActiveRecord::Migration
       t.string :name
       t.text :description
 
-      t.timestamps
+      t.timestamps null: false
     end
   end
 end
@@ -285,7 +287,7 @@ class CreateProducts < ActiveRecord::Migration
       t.string :name
       t.text :description
 
-      t.timestamps
+      t.timestamps null: false
     end
   end
 end
@@ -477,7 +479,8 @@ Rails will generate a name for every foreign key starting with
 There is a `:name` option to specify a different name if needed.
 
 NOTE: Active Record only supports single column foreign keys. `execute` and
-`structure.sql` are required to use composite foreign keys.
+`structure.sql` are required to use composite foreign keys. See
+[Schema Dumping and You](#schema-dumping-and-you).
 
 Removing a foreign key is easy as well:
 
@@ -693,6 +696,10 @@ of `create_table` and `reversible`, replacing `create_table`
 by `drop_table`, and finally replacing `up` by `down` and vice-versa.
 This is all taken care of by `revert`.
 
+NOTE: If you want to add check constraints like in the examples above,
+you will have to use `structure.sql` as dump method. See
+[Schema Dumping and You](#schema-dumping-and-you).
+
 Running Migrations
 ------------------
 
@@ -826,7 +833,7 @@ class CreateProducts < ActiveRecord::Migration
       create_table :products do |t|
         t.string :name
         t.text :description
-        t.timestamps
+        t.timestamps null: false
       end
     end
 
@@ -941,10 +948,10 @@ that Active Record supports. This could be very useful if you were to
 distribute an application that is able to run against multiple databases.
 
 There is however a trade-off: `db/schema.rb` cannot express database specific
-items such as triggers, or stored procedures. While in a migration you can
-execute custom SQL statements, the schema dumper cannot reconstitute those
-statements from the database. If you are using features like this, then you
-should set the schema format to `:sql`.
+items such as triggers, stored procedures or check constraints. While in a
+migration you can execute custom SQL statements, the schema dumper cannot
+reconstitute those statements from the database. If you are using features like
+this, then you should set the schema format to `:sql`.
 
 Instead of using Active Record's schema dumper, the database's structure will
 be dumped using a tool specific to the database (via the `db:structure:dump`

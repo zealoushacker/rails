@@ -1,5 +1,13 @@
 require 'abstract_unit'
 
+module I18n
+  class CustomExceptionHandler
+    def self.call(exception, locale, key, options)
+      'from CustomExceptionHandler'
+    end
+  end
+end
+
 class TranslationHelperTest < ActiveSupport::TestCase
   include ActionView::Helpers::TranslationHelper
 
@@ -70,6 +78,22 @@ class TranslationHelperTest < ActiveSupport::TestCase
     assert_raise(I18n::MissingTranslationData) do
       translate(:"translations.missing", :raise => true)
     end
+  end
+
+  def test_uses_custom_exception_handler_when_specified
+    old_exception_handler = I18n.exception_handler
+    I18n.exception_handler = I18n::CustomExceptionHandler
+    assert_equal 'from CustomExceptionHandler', translate(:"translations.missing", raise: false)
+  ensure
+    I18n.exception_handler = old_exception_handler
+  end
+
+  def test_uses_custom_exception_handler_when_specified_for_html
+    old_exception_handler = I18n.exception_handler
+    I18n.exception_handler = I18n::CustomExceptionHandler
+    assert_equal 'from CustomExceptionHandler', translate(:"translations.missing_html", raise: false)
+  ensure
+    I18n.exception_handler = old_exception_handler
   end
 
   def test_i18n_translate_defaults_to_nil_rescue_format
@@ -143,6 +167,12 @@ class TranslationHelperTest < ActiveSupport::TestCase
     translation = translate(:'translations.missing', :default => [:'translations.missing', :'translations.hello_html'])
     assert_equal '<a>Hello World</a>', translation
     assert_equal true, translation.html_safe?
+  end
+
+  def test_translate_with_last_default_not_named_html
+    translation = translate(:'translations.missing', :default => [:'translations.missing_html', :'translations.foo'])
+    assert_equal 'Foo', translation
+    assert_equal false, translation.html_safe?
   end
 
   def test_translate_with_string_default
